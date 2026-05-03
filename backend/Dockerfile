@@ -1,5 +1,5 @@
 # =============================================================================
-# Dockerfile — Backend FastAPI (RiskLab API)
+# Dockerfile — Backend FastAPI (RISK METER DASHBOARD API)
 #
 # GUIA DIDACTICA (para sustentacion):
 #
@@ -19,7 +19,7 @@
 FROM python:3.11-slim
 
 LABEL maintainer="risklab@usta.edu.co"
-LABEL description="RiskLab FastAPI Backend - Teoria del Riesgo USTA"
+LABEL description="RISK METER DASHBOARD FastAPI Backend"
 
 WORKDIR /app
 

@@ -1,7 +1,7 @@
 @echo off
-title RiskLabUSTA Dashboard
+title RISK METER DASHBOARD
 echo ============================================
-echo   RiskLabUSTA - Tablero de Riesgo Financiero
+echo   RISK METER DASHBOARD - Tablero de Riesgo Financiero
 echo ============================================
 echo.
 
@@ -17,5 +17,5 @@ echo  Presiona Ctrl+C para detener el servidor.
 echo.
 start http://localhost:8000
 cd backend
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --port 8000 --workers 4
 pause

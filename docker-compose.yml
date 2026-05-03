@@ -1,5 +1,5 @@
 # =====================================================================
-# docker-compose.yml — RiskLab USTA
+# docker-compose.yml — RISK METER DASHBOARD
 #
 # Orquesta el backend (FastAPI) y el frontend (Streamlit).
 #
@@ -27,7 +27,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: risklab_backend
+    container_name: risk_meter_backend
     ports:
       - "8000:8000"       # Puerto local:Puerto contenedor
     env_file:

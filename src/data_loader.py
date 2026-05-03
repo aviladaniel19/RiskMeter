@@ -1,40 +1,28 @@
-"""
-data_loader.py — Orquestación de carga y limpieza de datos.
-
-Usa Streamlit caching para evitar descargas repetidas
-y respetar rate limits de las APIs.
-"""
-
-import streamlit as st
 import pandas as pd
 import numpy as np
 from src.api_client import descargar_precios, descargar_indice, obtener_info_ticker
 
 
-@st.cache_data(ttl=3600, show_spinner="Descargando datos de Yahoo Finance...")
 def cargar_precios(tickers: list, inicio: str = None, fin: str = None,
                    periodo: str = "2y") -> pd.DataFrame:
     """
-    Carga precios con caché de 1 hora.
-    Aplica limpieza de valores faltantes (forward fill).
+    Carga precios y aplica limpieza de valores faltantes (forward fill).
     """
     precios = descargar_precios(tickers, inicio=inicio, fin=fin, periodo=periodo)
     precios = limpiar_datos(precios)
     return precios
 
 
-@st.cache_data(ttl=3600, show_spinner="Descargando índice de referencia...")
 def cargar_indice(ticker_indice: str = "^GSPC", inicio: str = None,
                   fin: str = None, periodo: str = "2y") -> pd.Series:
-    """Carga índice de referencia con caché."""
+    """Carga índice de referencia."""
     indice = descargar_indice(ticker_indice, inicio=inicio, fin=fin, periodo=periodo)
     indice = indice.ffill().dropna()
     return indice
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
 def cargar_info_tickers(tickers: list) -> dict:
-    """Carga información de tickers con caché de 24 horas."""
+    """Carga información de tickers."""
     return {t: obtener_info_ticker(t) for t in tickers}
 
 

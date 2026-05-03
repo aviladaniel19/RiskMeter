@@ -20,8 +20,10 @@ Reutilización de src/ existentes:
 import sys
 import os
 import types
+import time
 from datetime import datetime
 from functools import lru_cache
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -59,6 +61,9 @@ from returns import (
     estadisticas_descriptivas,
     pruebas_normalidad,
     interpretar_hechos_estilizados,
+    calcular_qq_plot,
+    calcular_stats_boxplot,
+    test_kupiec,
 )
 from indicators import (
     sma, ema, rsi, macd, bollinger_bands,
@@ -72,13 +77,41 @@ from var_cvar import (
     cvar,
 )
 from capm import calcular_beta, calcular_capm, discusion_riesgo_sistematico
-from garch_models import comparar_modelos, pronostico_volatilidad, ajustar_garch, diagnostico_residuos
+from garch_models import comparar_modelos, pronostico_volatilidad, ajustar_garch, ajustar_egarch, diagnostico_residuos, justificacion_heterocedasticidad
 from markowitz import simular_portafolios, portafolio_minima_varianza, portafolio_max_sharpe
 from signals import resumen_senales
 from macro_benchmark import (
     alpha_jensen, tracking_error, information_ratio,
     max_drawdown, interpretacion_benchmark
 )
+
+
+# ── Decorador personalizado: registra tiempo de ejecución ──────────
+def log_metodo(nombre_metodo: str):
+    """
+    Decorador de comportamiento que registra el tiempo de ejecución.
+    Implementa el requerimiento de la rúbrica (buenas prácticas — Semana 1).
+    """
+    import functools
+    import time
+    import logging
+    logger = logging.getLogger("risklab.services")
+
+    def decorador(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            inicio = time.perf_counter()
+            try:
+                resultado = func(*args, **kwargs)
+                ms = (time.perf_counter() - inicio) * 1000
+                logger.info(f"[OK] {nombre_metodo} completado en {ms:.1f}ms")
+                return resultado
+            except Exception as e:
+                ms = (time.perf_counter() - inicio) * 1000
+                logger.error(f"[ERR] {nombre_metodo} falló en {ms:.1f}ms: {e}")
+                raise
+        return wrapper
+    return decorador
 
 
 class RiskService:
@@ -91,34 +124,25 @@ class RiskService:
 
     def __init__(self, settings):
         self.settings = settings
+        # Caché de memoria persistente entre peticiones
+        # Estructura: {(tickers_tuple, periodo): (DataFrame, expire_time)}
+        if not hasattr(RiskService, "_CACHE"):
+            RiskService._CACHE = {}
 
-    # ── Decorador personalizado: registra tiempo de ejecución ──────────
-    @staticmethod
-    def _log_tiempo(nombre_metodo: str):
-        """
-        Decorador de comportamiento que registra el tiempo de ejecución.
-        Implementa el requerimiento de la rúbrica (buenas prácticas — Semana 1).
-        """
-        import functools
-        import time
-        import logging
-        logger = logging.getLogger("risklab.services")
+    def _get_cache(self, tickers: list[str], periodo: str) -> Optional[pd.DataFrame]:
+        t_key = (tuple(sorted(tickers)), periodo)
+        if t_key in RiskService._CACHE:
+            df, expire = RiskService._CACHE[t_key]
+            if time.time() < expire:
+                return df
+            else:
+                del RiskService._CACHE[t_key]
+        return None
 
-        def decorador(func):
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                inicio = time.perf_counter()
-                try:
-                    resultado = func(*args, **kwargs)
-                    ms = (time.perf_counter() - inicio) * 1000
-                    logger.info(f"[OK] {nombre_metodo} completado en {ms:.1f}ms")
-                    return resultado
-                except Exception as e:
-                    ms = (time.perf_counter() - inicio) * 1000
-                    logger.error(f"[ERR] {nombre_metodo} falló en {ms:.1f}ms: {e}")
-                    raise
-            return wrapper
-        return decorador
+    def _set_cache(self, tickers: list[str], periodo: str, df: pd.DataFrame):
+        t_key = (tuple(sorted(tickers)), periodo)
+        # TTL de 5 minutos (300 segundos)
+        RiskService._CACHE[t_key] = (df, time.time() + 300)
 
     # ════════════════════════════════════════════════════
     # MÉTODOS DE DATOS BASE
@@ -131,11 +155,21 @@ class RiskService:
         inicio: str = None,
         fin: str = None,
     ) -> pd.DataFrame:
-        """Descarga y limpia precios de un ticker desde Yahoo Finance."""
+        """Descarga y limpia precios de un ticker desde Yahoo Finance (Con Caché)."""
+        # Solo usamos la caché si no hay fechas específicas (periodo relativo)
+        if not inicio and not fin:
+            cached = self._get_cache([ticker], periodo)
+            if cached is not None:
+                return cached
+
         precios = descargar_precios(
             [ticker], inicio=inicio, fin=fin, periodo=periodo
         )
         precios = precios.ffill().dropna()
+
+        if not inicio and not fin:
+            self._set_cache([ticker], periodo, precios)
+
         return precios
 
     def obtener_precios_multiples(
@@ -143,9 +177,15 @@ class RiskService:
         tickers: list[str],
         periodo: str = "2y",
     ) -> pd.DataFrame:
-        """Descarga precios de múltiples tickers alineados en el mismo DataFrame."""
+        """Descarga precios de múltiples tickers alineados (Con Caché)."""
+        cached = self._get_cache(tickers, periodo)
+        if cached is not None:
+            return cached
+
         precios = descargar_precios(tickers, periodo=periodo)
         precios = precios.ffill().dropna()
+
+        self._set_cache(tickers, periodo, precios)
         return precios
 
     def obtener_rendimientos(
@@ -160,6 +200,7 @@ class RiskService:
     # MÓDULO 1: INDICADORES TÉCNICOS
     # ════════════════════════════════════════════════════
 
+    @log_metodo("Cálculo de Indicadores")
     def calcular_indicadores(
         self,
         ticker: str,
@@ -219,6 +260,7 @@ class RiskService:
     # MÓDULO 2: RENDIMIENTOS
     # ════════════════════════════════════════════════════
 
+    @log_metodo("Cálculo de Rendimientos")
     def calcular_rendimientos_completo(
         self,
         ticker: str,
@@ -254,6 +296,10 @@ class RiskService:
             for f in fechas
         ]
 
+        # Q-Q Plot y Boxplot (Requerimientos de la Rúbrica)
+        qq_puntos = calcular_qq_plot(ret_log)
+        stats_boxplot = calcular_stats_boxplot(ret_log)
+
         return {
             "ticker": ticker,
             "tipo": "log",
@@ -270,6 +316,8 @@ class RiskService:
             },
             "jarque_bera": fmt_prueba(pruebas["Jarque-Bera"]),
             "shapiro_wilk": fmt_prueba(pruebas["Shapiro-Wilk"]),
+            "qq_plot": qq_puntos,
+            "boxplot": stats_boxplot,
             "rendimientos": puntos,
             "hechos_estilizados": hechos,
         }
@@ -278,6 +326,7 @@ class RiskService:
     # MÓDULO 3: GARCH
     # ════════════════════════════════════════════════════
 
+    @log_metodo("Ajuste Modelo GARCH")
     def calcular_garch(self, ticker: str, periodo: str = "2y") -> dict:
         """Ajusta modelos GARCH y retorna comparación AIC/BIC."""
         precios_df = self.obtener_precios(ticker, periodo=periodo)
@@ -292,24 +341,24 @@ class RiskService:
 
         # Pronóstico de volatilidad usando el mejor modelo
         pronostico_df = pronostico_volatilidad(mejor_modelo_dict, horizonte=10)
-        pronostico_lista = pronostico_df["Volatilidad_Pronosticada"].tolist()
+        pronostico_lista = [float(v) for v in pronostico_df["Volatilidad_Pronosticada"].tolist()]
 
         # Diagnóstico de residuos del mejor modelo
         diag = diagnostico_residuos(mejor_modelo_dict)
 
         # Construir lista de modelos para la respuesta
         modelos_comparados = []
-        mejor_aic = min(m["aic"] for m in modelos_lista)
+        mejor_aic = float(min(m["aic"] for m in modelos_lista))
         for m in modelos_lista:
             modelos_comparados.append({
                 "nombre": m["nombre"],
-                "aic": round(m["aic"], 2),
-                "bic": round(m["bic"], 2),
-                "log_likelihood": round(m["loglik"], 2),
+                "aic": round(float(m["aic"]), 2),
+                "bic": round(float(m["bic"]), 2),
+                "log_likelihood": round(float(m["loglik"]), 2),
                 "volatilidad_anualizada": round(
                     float(m["volatilidad_condicional"].iloc[-1]) * np.sqrt(252), 4
                 ),
-                "es_mejor": m["aic"] == mejor_aic,
+                "es_mejor": bool(float(m["aic"]) == mejor_aic),
             })
 
         return {
@@ -318,15 +367,163 @@ class RiskService:
             "mejor_modelo": mejor_nombre,
             "pronostico_volatilidad": pronostico_lista,
             "jarque_bera_residuos": {
-                "estadístico": diag["JB_estadistico"],
-                "p_valor": diag["JB_p_valor"],
-                "es_normal": diag["residuos_normales"],
+                "estadístico": float(diag["JB_estadistico"]),
+                "p_valor": float(diag["JB_p_valor"]),
+                "es_normal": bool(diag["residuos_normales"]),
                 "interpretación": diag["interpretacion"],
             },
             "interpretacion": (
                 f"Mejor modelo por AIC/BIC: {mejor_nombre}. "
                 "Se verifica el diagnóstico de residuos estandarizados."
             ),
+        }
+
+    def calcular_volatilidad_completo(self, ticker: str, periodo: str = "2y") -> dict:
+        """
+        Análisis completo de modelación de volatilidad condicional.
+        Incluye: estacionariedad, detección ARCH, comparación de modelos,
+        serie de volatilidad condicional, diagnóstico de residuos y pronóstico.
+        """
+        from statsmodels.tsa.stattools import adfuller
+        from statsmodels.stats.diagnostic import het_arch, acorr_ljungbox
+
+        precios_df = self.obtener_precios(ticker, periodo=periodo)
+        precios = precios_df.iloc[:, 0]
+        ret = rendimientos_log(precios_df).iloc[:, 0].dropna()
+
+        # ── 1. Estacionariedad (ADF) ──
+        adf_result = adfuller(ret, autolag='AIC')
+        adf_info = {
+            "estadistico": round(float(adf_result[0]), 4),
+            "p_valor": round(float(adf_result[1]), 6),
+            "lags_usados": int(adf_result[2]),
+            "n_observaciones": int(adf_result[3]),
+            "valores_criticos": {k: round(float(v), 4) for k, v in adf_result[4].items()},
+            "es_estacionaria": bool(adf_result[1] < 0.05),
+        }
+
+        # ── 2. Detección ARCH-LM ──
+        try:
+            lm_stat, lm_pval, _, _ = het_arch(ret.values, nlags=5)
+            arch_lm = {
+                "estadistico": round(float(lm_stat), 4),
+                "p_valor": round(float(lm_pval), 6),
+                "hay_efectos_arch": bool(lm_pval < 0.05),
+            }
+        except Exception:
+            arch_lm = {"estadistico": 0, "p_valor": 1, "hay_efectos_arch": False}
+
+        # ── 3. Ljung-Box sobre residuales al cuadrado ──
+        ret_sq = ret ** 2
+        try:
+            lb = acorr_ljungbox(ret_sq.dropna(), lags=[10], return_df=True)
+            lb_stat = float(lb['lb_stat'].iloc[0])
+            lb_pval = float(lb['lb_pvalue'].iloc[0])
+        except Exception:
+            lb_stat, lb_pval = 0.0, 1.0
+        ljung_box_sq = {
+            "estadistico": round(lb_stat, 4),
+            "p_valor": round(lb_pval, 6),
+            "hay_autocorrelacion": bool(lb_pval < 0.05),
+        }
+
+        # ── 4. Comparar modelos ARCH/GARCH/EGARCH ──
+        try:
+            tabla, modelos_lista = comparar_modelos(ret)
+            if not modelos_lista:
+                raise ValueError("No se pudieron ajustar los modelos.")
+            mejor_modelo_dict = min(modelos_lista, key=lambda m: m["aic"])
+            mejor_nombre = mejor_modelo_dict["nombre"]
+        except Exception as e:
+            raise RuntimeError(f"Error en modelado GARCH: {e}")
+
+        modelos_comparados = []
+        mejor_aic = float(min(m["aic"] for m in modelos_lista))
+        for m in modelos_lista:
+            modelos_comparados.append({
+                "nombre": m["nombre"],
+                "aic": round(float(m["aic"]), 2),
+                "bic": round(float(m["bic"]), 2),
+                "log_likelihood": round(float(m["loglik"]), 2),
+                "volatilidad_anualizada": round(
+                    float(m["volatilidad_condicional"].iloc[-1]) * np.sqrt(252), 4
+                ),
+                "es_mejor": bool(float(m["aic"]) == mejor_aic),
+            })
+
+        # ── 5. Serie de volatilidad condicional del mejor modelo ──
+        vol_cond = mejor_modelo_dict["volatilidad_condicional"]
+        # Anualizarla
+        vol_cond_anual = vol_cond * np.sqrt(252)
+        vol_fechas = vol_cond.index
+        # Tomar últimos 500 puntos
+        n_pts = min(500, len(vol_cond_anual))
+        serie_vol = [
+            {"fecha": str(vol_fechas[-n_pts + i].date() if hasattr(vol_fechas[-n_pts + i], 'date') else vol_fechas[-n_pts + i]),
+             "volatilidad": round(float(vol_cond_anual.iloc[-n_pts + i]), 6)}
+            for i in range(n_pts)
+        ]
+
+        # ── 6. Rendimientos al cuadrado (para visualizar clustering) ──
+        ret_sq_series = ret ** 2
+        n_sq = min(500, len(ret_sq_series))
+        serie_ret_sq = [
+            {"fecha": str(ret_sq_series.index[-n_sq + i].date()),
+             "valor": round(float(ret_sq_series.iloc[-n_sq + i]), 8)}
+            for i in range(n_sq)
+        ]
+
+        # ── 7. Pronóstico ──
+        pronostico_df = pronostico_volatilidad(mejor_modelo_dict, horizonte=30)
+        pronostico_lista = [round(float(v), 6) for v in pronostico_df["Volatilidad_Pronosticada"].tolist()]
+
+        # ── 8. Diagnóstico de Residuos ──
+        diag = diagnostico_residuos(mejor_modelo_dict)
+        std_resid = mejor_modelo_dict["residuos_estandarizados"].dropna()
+        n_res = min(500, len(std_resid))
+        serie_residuos = [
+            {"fecha": str(std_resid.index[-n_res + i].date() if hasattr(std_resid.index[-n_res + i], 'date') else str(std_resid.index[-n_res + i])),
+             "valor": round(float(std_resid.iloc[-n_res + i]), 4)}
+            for i in range(n_res)
+        ]
+
+        # Ljung-Box sobre residuos estandarizados
+        try:
+            lb_res = acorr_ljungbox(std_resid, lags=[10], return_df=True)
+            lb_res_pval = float(lb_res['lb_pvalue'].iloc[0])
+        except Exception:
+            lb_res_pval = 1.0
+
+        return {
+            "ticker": ticker,
+            "n_observaciones": len(ret),
+            "adf_test": adf_info,
+            "arch_lm_test": arch_lm,
+            "ljung_box_cuadrados": ljung_box_sq,
+            "modelos_comparados": modelos_comparados,
+            "mejor_modelo": mejor_nombre,
+            "serie_volatilidad_condicional": serie_vol,
+            "serie_rendimientos_cuadrados": serie_ret_sq,
+            "pronostico_volatilidad": pronostico_lista,
+            "diagnostico_residuos": {
+                "media": float(diag["media_residuos"]),
+                "desv_estandar": float(diag["std_residuos"]),
+                "asimetria": float(diag["asimetria"]),
+                "curtosis_exceso": float(diag["curtosis_exc"]),
+                "jb_estadistico": float(diag["JB_estadistico"]),
+                "jb_p_valor": float(diag["JB_p_valor"]),
+                "residuos_normales": bool(diag["residuos_normales"]),
+                "ljung_box_p_valor": round(float(lb_res_pval), 6),
+                "sin_autocorrelacion": bool(lb_res_pval > 0.05),
+            },
+            "serie_residuos_estandarizados": serie_residuos,
+            "resumen_modelo": {
+                "distribucion": mejor_modelo_dict.get("distribución", "Normal"),
+                "coeficientes": mejor_modelo_dict.get("coeficientes", []),
+                "aic": round(float(mejor_modelo_dict["aic"]), 2),
+                "bic": round(float(mejor_modelo_dict["bic"]), 2),
+                "loglik": round(float(mejor_modelo_dict["loglik"]), 2),
+            }
         }
 
     # ════════════════════════════════════════════════════
@@ -380,6 +577,7 @@ class RiskService:
     # MÓDULO 5: VaR y CVaR
     # ════════════════════════════════════════════════════
 
+    @log_metodo("Cálculo de Riesgo (VaR)")
     def calcular_var(
         self,
         tickers: list[str],
@@ -391,7 +589,11 @@ class RiskService:
         precios = self.obtener_precios_multiples(tickers, periodo=periodo)
         ret = rendimientos_log(precios)
 
-        pesos_np = np.array(pesos)
+        tickers_descargados = precios.columns.tolist()
+        pesos_filtrados = [pesos[tickers.index(t)] for t in tickers_descargados if t in tickers]
+        total_peso = sum(pesos_filtrados)
+        pesos_np = np.array(pesos_filtrados) / total_peso if total_peso > 0 else np.array(pesos_filtrados)
+
         ret_port = (ret * pesos_np).sum(axis=1)
 
         vp = var_parametrico(ret_port, nivel_confianza)
@@ -410,6 +612,14 @@ class RiskService:
                 "interpretacion": v["interpretacion"],
             }
 
+        # Backtesting (Test de Kupiec)
+        # Contamos cuántas veces el retorno fue menor que el -VaR Historico (diario)
+        # Nota: VaR se expresa como valor absoluto positivo en vp/vh
+        var_h_diario = vh["var_diario"]
+        excepciones = int((ret_port < -var_h_diario).sum())
+        n_obs = len(ret_port)
+        kupiec = test_kupiec(excepciones, n_obs, nivel_confianza)
+
         ret_anual = float(ret_port.mean() * 252)
         vol_anual = float(ret_port.std() * np.sqrt(252))
 
@@ -425,6 +635,14 @@ class RiskService:
                 "cvar_diario_pct": f"{cv['cvar_diario']*100:.2f}%",
                 "interpretacion": cv["interpretacion"],
             },
+            "backtesting": {
+                "n_observaciones": n_obs,
+                "excepciones_reales": excepciones,
+                "excepciones_esperadas": round(n_obs * (1 - nivel_confianza), 2),
+                "kupiec_p_valor": kupiec["p_valor"],
+                "kupiec_valido": kupiec["valido"],
+                "interpretacion": kupiec["interpretacion"]
+            },
             "rendimiento_portafolio_anual": ret_anual,
             "volatilidad_portafolio_anual": vol_anual,
         }
@@ -433,6 +651,7 @@ class RiskService:
     # MÓDULO 6: MARKOWITZ
     # ════════════════════════════════════════════════════
 
+    @log_metodo("Optimización Markowitz")
     def calcular_frontera(
         self,
         tickers: list[str],
@@ -497,26 +716,28 @@ class RiskService:
                 res = resumen_senales(precios, nombre=t)
                 senales_list = res["senales"]
 
-                def get_senal(ind_name):
+                def get_info(ind_name):
                     for s in senales_list:
                         if ind_name in s.get("indicador", ""):
-                            return s.get("señal", "N/D")
-                    return "N/D"
+                            return s
+                    return {}
 
                 # Mapear veredicto al formato esperado
                 veredicto = res["veredicto"]
                 senal_global = "COMPRAR" if "COMPRA" in veredicto else ("VENDER" if "VENTA" in veredicto else "MANTENER")
 
+                rsi_info = get_info("RSI")
+
                 alertas.append({
                     "ticker": t,
                     "senal_global": senal_global,
-                    "macd_senal": get_senal("MACD"),
-                    "rsi_senal": get_senal("RSI"),
-                    "bollinger_senal": get_senal("Bollinger"),
-                    "cruce_medias": get_senal("Cruce"),
-                    "estocastico_senal": get_senal("Estocástico"),
+                    "macd_senal": get_info("MACD").get("señal", "N/D"),
+                    "rsi_senal": rsi_info.get("señal", "N/D"),
+                    "bollinger_senal": get_info("Bollinger").get("señal", "N/D"),
+                    "cruce_medias": get_info("Cruce").get("señal", "N/D"),
+                    "estocastico_senal": get_info("Estocástico").get("señal", "N/D"),
                     "ultimo_precio": float(precios.iloc[-1]),
-                    "rsi_actual": None,
+                    "rsi_actual": rsi_info.get("valor"),
                     "texto_interpretativo": res["veredicto"],
                 })
             except Exception as e:
@@ -529,7 +750,7 @@ class RiskService:
                     "cruce_medias": "N/D",
                     "estocastico_senal": "N/D",
                     "ultimo_precio": 0.0,
-                    "rsi_actual": None,
+                    "rsi_actual": 0.0,
                     "texto_interpretativo": f"Error: {e}",
                 })
 

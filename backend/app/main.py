@@ -1,5 +1,5 @@
 """
-main.py — Punto de entrada de la API RiskLab.
+main.py — Punto de entrada de la API RISK METER DASHBOARD.
 
 FastAPI con 9 endpoints async que cumplen todos los requerimientos
 de la rúbrica del Proyecto Integrador de Teoría del Riesgo.
@@ -89,9 +89,9 @@ def log_request(func):
 # ──────────────────────────────────────────────
 
 app = FastAPI(
-    title="RiskLab API — Teoría del Riesgo USTA",
+    title="RISK METER DASHBOARD API — Teoría del Riesgo",
     description=(
-        "Backend FastAPI para el tablero interactivo de riesgo financiero. "
+        "Backend FastAPI para el tablero interactivo de riesgo financiero (RISK METER DASHBOARD). "
         "Expone 9 endpoints de análisis cuantitativo: indicadores técnicos, "
         "rendimientos, GARCH, CAPM, VaR/CVaR, Markowitz, señales y macro. "
         "Todos los inputs son validados con modelos Pydantic."
@@ -194,7 +194,7 @@ async def health_check():
     """Verifica que la API está operativa."""
     return {
         "status": "ok",
-        "app": "RiskLab API",
+        "app": "RISK METER DASHBOARD API",
         "version": "2.0.0",
         "docs": "/docs",
     }
@@ -367,6 +367,37 @@ async def get_garch(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Error ajustando modelos GARCH: {e}",
+        )
+    return resultado
+
+
+# ── ENDPOINT 5b: /volatilidad/{ticker} ────────
+
+@app.get(
+    "/volatilidad/{ticker}",
+    tags=["GARCH"],
+    summary="Análisis completo de modelación de volatilidad condicional",
+    description=(
+        "Endpoint completo para la sección de Volatilidad. "
+        "Incluye: test ADF de estacionariedad, prueba ARCH-LM de Engle, "
+        "Ljung-Box sobre residuales², comparación ARCH/GARCH/EGARCH, "
+        "serie de volatilidad condicional, rendimientos², pronóstico 30d, "
+        "y diagnóstico exhaustivo de residuos estandarizados."
+    ),
+)
+@log_request
+async def get_volatilidad(
+    ticker: str,
+    periodo: str = Query(default="2y"),
+    svc: RiskService = Depends(get_risk_service),
+):
+    ticker = ticker.upper()
+    try:
+        resultado = svc.calcular_volatilidad_completo(ticker, periodo=periodo)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Error en análisis de volatilidad: {e}",
         )
     return resultado
 

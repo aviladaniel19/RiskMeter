@@ -1,6 +1,6 @@
-# Guía de Contribución — RiskLab USTA
+# Guía de Contribución — RISK METER DASHBOARD
 
-¡Gracias por tu interés en contribuir a RiskLab USTA! Este documento describe cómo puedes participar en el desarrollo del proyecto.
+¡Gracias por tu interés en contribuir a RISK METER DASHBOARD! Este documento describe cómo puedes participar en el desarrollo del proyecto.
 
 ## Reporte de Bugs
 
@@ -27,8 +27,8 @@ Para sugerir una nueva característica:
 ### 1. Fork y Rama
 
 ```bash
-git clone https://github.com/tu-usuario/RiskLabUSTA.git
-cd RiskLabUSTA
+git clone https://github.com/tu-usuario/RISK METER DASHBOARD.git
+cd RISK METER DASHBOARD
 git checkout -b feature/nombre-descriptivo
 ```
 
@@ -127,4 +127,4 @@ git push origin feature/nombre-descriptivo
 
 ---
 
-**¡Gracias por contribuir a RiskLab USTA!** 🚀
+**¡Gracias por contribuir a RISK METER DASHBOARD!** 🚀
