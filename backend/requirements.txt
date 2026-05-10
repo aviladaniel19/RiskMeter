@@ -29,3 +29,9 @@ arch>=7.0.0
 # ── Utilidades ────────────────────────────
 python-dotenv>=1.0.1
 requests>=2.32.0
+
+# ── Persistencia (Capa 1) ────────────────
+sqlalchemy>=2.0.30
+
+# ── Machine Learning (Capa 4) ────────────
+joblib>=1.4.0

@@ -483,11 +483,14 @@
     </div>
 
     <div class="tabs">
-      <button class="tab act" onclick="sw('perf',this)">A. Rendimiento</button>
-      <button class="tab" onclick="sw('sig',this)">B. Señales</button>
-      <button class="tab" onclick="sw('risk',this)">C. Riesgo</button>
-      <button class="tab" onclick="sw('vol',this)">D. Volatilidad</button>
-      <button class="tab" onclick="sw('optim',this)">E. Optimización</button>
+      <button class="tab act" onclick="sw('perf',this)">Rendimiento</button>
+      <button class="tab" onclick="sw('sig',this)">Señales</button>
+      <button class="tab" onclick="sw('risk',this)">Riesgo</button>
+      <button class="tab" onclick="sw('vol',this)">Volatilidad</button>
+      <button class="tab" onclick="sw('optim',this)">Optimización</button>
+      <button class="tab" onclick="sw('fixed',this)">Renta Fija</button>
+      <button class="tab" onclick="sw('deriv',this)">Derivados</button>
+      <button class="tab" onclick="sw('ml',this)">IA Predictiva</button>
     </div>
 
     <div id="s-perf"></div>
@@ -495,9 +498,13 @@
     <div id="s-risk" style="display:none"></div>
     <div id="s-vol" style="display:none"></div>
     <div id="s-optim" style="display:none"></div>
+    <div id="s-fixed" style="display:none"></div>
+    <div id="s-deriv" style="display:none"></div>
+    <div id="s-ml" style="display:none"></div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   <script>
     /* ── GLOBAL STATE ─────────────────────────────────── */
     let GLOBAL = null;
@@ -536,11 +543,12 @@
     }
 
     /* ── API CALLS ────────────────────────────────────── */
-    async function api(path, p = {}, method = 'GET', body = null) {
+    async function api(path, p = {}, method = 'GET', body = null, signal = null) {
       let url = new URL(path, window.location.origin);
       Object.keys(p).forEach(k => url.searchParams.append(k, p[k]));
       let opt = { method, headers: { 'Content-Type': 'application/json' } };
       if (body) opt.body = JSON.stringify(body);
+      if (signal) opt.signal = signal;
       let res = await fetch(url, opt);
       if (!res.ok) throw new Error(`API ${res.status}: ` + (await res.text()).slice(0, 200));
       return await res.json();
@@ -578,14 +586,34 @@
         }
 
         // Fase 3: Alertas + GARCH + Benchmark
-        ts.innerHTML = "[4/4] Generando señales técnicas y datos de benchmark...";
+        ts.innerHTML = "[4/5] Generando señales técnicas y datos de benchmark...";
         const alertas = await api('/alertas', { tickers: rawT.join(','), periodo: per });
         let garch = null;
         let benchRends = null;
         try { garch = await api(`/garch/${rawT[0]}`, { periodo: per }) } catch (e) { console.warn('GARCH:', e.message); }
         try { benchRends = await api(`/rendimientos/${encodeURIComponent(capm.benchmark)}`, { periodo: per }) } catch (e) { console.warn('Benchmark rends:', e.message); }
 
-        GLOBAL = { tickers: rawT, pesos: w, capm, macro, alertas, varData, front, rends, ind, precios, garch, volData: {}, benchRends };
+        // Fase 4: Nuevos Módulos (Renta Fija)
+        ts.innerHTML = "[5/5] Descargando curva de renta fija (Nelson-Siegel)...";
+        let fixed = null;
+        try { fixed = await api('/renta-fija/curva') } catch (e) { console.warn('Renta Fija:', e.message); }
+
+        GLOBAL = { 
+          tickers: rawT, 
+          pesos: w, 
+          capm, 
+          macro, 
+          alertas, 
+          varData, 
+          front, 
+          rends, 
+          ind, 
+          precios, 
+          garch, 
+          volData: {}, 
+          benchRends,
+          fixed
+        };
         ts.innerHTML = `<span style="color:#10b981">●</span> Sincronizado &nbsp;·&nbsp; ${new Date().toLocaleTimeString('es-CO')}`;
         let act = document.querySelector('.tab.act');
         if (act) sw(act.getAttribute('onclick').match(/'([^']+)'/)[1], act);
@@ -1048,40 +1076,94 @@
       const betaPort = c.activos.reduce((sum, a, i) => sum + (a.beta * GLOBAL.pesos[i]), 0);
       const cv = v.cvar;
 
-      // ── Perfil de riesgo ──
-      let perfil, perfilColor, perfilIcon, perfilDesc, perfilTickers, perfilEstrategia;
-      if (betaPort < 0.8) {
-        perfil = 'Defensivo (Core / Value)'; perfilColor = '#3dd32c'; perfilIcon = '🛡️';
-        perfilDesc = 'Minimizar la Desviación Estándar y lograr un β < 0.8. Empresas maduras con flujos de caja inelásticos a los ciclos económicos.';
-        perfilTickers = 'JNJ (Salud) · PG / KO (Consumo Básico) · NOC / LMT (Defensa) · NEE (Utilities)';
-        perfilEstrategia = 'Empresas monopolísticas u oligopolísticas cuyos productos son comprados haya crisis o no. Presupuestos de defensa como seguro contra volatilidad tecnológica.';
-      } else if (betaPort <= 1.2) {
-        perfil = 'Dinámico (Blend)'; perfilColor = '#3b82f6'; perfilIcon = '⚖️';
-        perfilDesc = 'Replicar el riesgo sistemático del mercado con β ≈ 1.0 – 1.1. Mega-caps que dictan la dirección del S&P 500.';
-        perfilTickers = 'MSFT · AAPL (Tech Mega-cap) · V / MA (Peajes de la economía) · BRK.B (Diversificación interna)';
-        perfilEstrategia = 'Combinación de crecimiento moderado con ingresos sólidos. Visa y Mastercard crecen atadas a la inflación y al gasto del consumidor.';
-      } else if (betaPort <= 1.5) {
-        perfil = 'Agresivo'; perfilColor = '#f59e0b'; perfilIcon = '🔥';
-        perfilDesc = 'Exposición elevada a la volatilidad con β entre 1.2 y 1.5. Balance entre crecimiento y gestión del riesgo.';
-        perfilTickers = 'NVDA · AMD (IA) · MSFT (ancla) · ASML (Semiconductores)';
-        perfilEstrategia = 'Infraestructura de IA con anclas de estabilidad. Requiere monitoreo activo del VaR para controlar el drawdown.';
-      } else {
-        perfil = 'Muy Agresivo — Especulativo (Growth)'; perfilColor = '#ef4444'; perfilIcon = '⚡';
-        perfilDesc = 'Maximizar retorno asumiendo exposición extrema a la volatilidad con β > 1.5. Gestión del VaR muy estricta.';
-        perfilTickers = 'NVDA / AMD (IA) · ASML (Semiconductores) · HOOD (Fintech) · IREN / COIN (Cripto)';
-        perfilEstrategia = 'Startups tecnológicas, infraestructura de IA y criptoactivos. Sufren correcciones brutales cuando las expectativas de ingresos fallan.';
-      }
+      // ── Adaptación a Perfiles de Riesgo (CAL) ──
+      const opt = GLOBAL.front.portafolio_max_sharpe;
+      const rf = GLOBAL.capm.rf_actual;
+      
+      const pAgresivo = { w: 1, ret: opt.rendimiento_anual, vol: opt.volatilidad_anual };
+      const pModerado = { w: 0.5, ret: 0.5 * opt.rendimiento_anual + 0.5 * rf, vol: 0.5 * opt.volatilidad_anual };
+      const pConservador = { w: 0.2, ret: 0.2 * opt.rendimiento_anual + 0.8 * rf, vol: 0.2 * opt.volatilidad_anual };
+
+      let perfilesHtml = `
+      <div class="card" style="border-color:#818cf8;border-width:1px">
+        <div class="ct" style="color:#818cf8">Línea de Asignación de Capital (CAL) — Adaptación a Perfiles de Riesgo</div>
+        <div style="font-size:12px;color:#94a3b8;line-height:1.5;margin-bottom:15px">
+          El <strong>Portafolio Óptimo (Máximo Sharpe)</strong> es nuestro producto estrella inamovible en renta variable. 
+          Lo que cambia según el perfil de riesgo del cliente no son las acciones que lo componen, sino cuánto capital se le asigna frente al Activo Libre de Riesgo (R<sub>f</sub>: ${pct(rf)}).
+        </div>
+        <div class="g3" style="margin-bottom:0">
+          <div class="mc" style="border-color:#ef4444;margin-bottom:0">
+            <div class="ml" style="color:#ef4444;font-size:13px">🔥 Perfil Agresivo</div>
+            <div style="font-size:12px;color:#e2e8f0;margin-bottom:10px">Apreciación Máxima</div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:11px;color:#64748b">Portafolio Óptimo:</span><span style="font-size:11px;color:#ffffff;font-family:'SF Mono',monospace">100%</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+              <span style="font-size:11px;color:#64748b">Liquidez (R<sub>f</sub>):</span><span style="font-size:11px;color:#ffffff;font-family:'SF Mono',monospace">0%</span>
+            </div>
+            <div style="background:#05080f;padding:8px;border-radius:6px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="font-size:10px;color:#64748b">Retorno Esp.</span><span style="font-size:12px;color:#ef4444;font-family:'SF Mono',monospace;font-weight:700">${pct(pAgresivo.ret)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px">
+                <span style="font-size:10px;color:#64748b">Volatilidad</span><span style="font-size:12px;color:#ef4444;font-family:'SF Mono',monospace;font-weight:700">${pct(pAgresivo.vol)}</span>
+              </div>
+            </div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:10px;line-height:1.4">Asume el 100% de la volatilidad del mercado de renta variable.</div>
+          </div>
+
+          <div class="mc" style="border-color:#3b82f6;margin-bottom:0">
+            <div class="ml" style="color:#3b82f6;font-size:13px">⚖️ Perfil Moderado</div>
+            <div style="font-size:12px;color:#e2e8f0;margin-bottom:10px">Crecimiento Equilibrado</div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:11px;color:#64748b">Portafolio Óptimo:</span><span style="font-size:11px;color:#ffffff;font-family:'SF Mono',monospace">50%</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+              <span style="font-size:11px;color:#64748b">Liquidez (R<sub>f</sub>):</span><span style="font-size:11px;color:#ffffff;font-family:'SF Mono',monospace">50%</span>
+            </div>
+            <div style="background:#05080f;padding:8px;border-radius:6px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="font-size:10px;color:#64748b">Retorno Esp.</span><span style="font-size:12px;color:#3b82f6;font-family:'SF Mono',monospace;font-weight:700">${pct(pModerado.ret)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px">
+                <span style="font-size:10px;color:#64748b">Volatilidad</span><span style="font-size:12px;color:#3b82f6;font-family:'SF Mono',monospace;font-weight:700">${pct(pModerado.vol)}</span>
+              </div>
+            </div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:10px;line-height:1.4">Reduce la volatilidad (y la exposición al Drawdown) exactamente a la mitad.</div>
+          </div>
+
+          <div class="mc" style="border-color:#3dd32c;margin-bottom:0">
+            <div class="ml" style="color:#3dd32c;font-size:13px">🛡️ Perfil Conservador</div>
+            <div style="font-size:12px;color:#e2e8f0;margin-bottom:10px">Preservación de Capital</div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:11px;color:#64748b">Portafolio Óptimo:</span><span style="font-size:11px;color:#ffffff;font-family:'SF Mono',monospace">20%</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+              <span style="font-size:11px;color:#64748b">Liquidez (R<sub>f</sub>):</span><span style="font-size:11px;color:#ffffff;font-family:'SF Mono',monospace">80%</span>
+            </div>
+            <div style="background:#05080f;padding:8px;border-radius:6px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="font-size:10px;color:#64748b">Retorno Esp.</span><span style="font-size:12px;color:#3dd32c;font-family:'SF Mono',monospace;font-weight:700">${pct(pConservador.ret)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px">
+                <span style="font-size:10px;color:#64748b">Volatilidad</span><span style="font-size:12px;color:#3dd32c;font-family:'SF Mono',monospace;font-weight:700">${pct(pConservador.vol)}</span>
+              </div>
+            </div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:10px;line-height:1.4">Volatilidad mínima. Si el mercado cae 30%, el impacto en la cuenta es solo del 6%.</div>
+          </div>
+        </div>
+      </div>
+      `;
 
       let garchHtml = GLOBAL.garch ? `<div class="card" style="margin-bottom:0">
         <div class="ct">Pronóstico Volatilidad — ${GLOBAL.garch.mejor_modelo} (${GLOBAL.garch.ticker})</div>
         <div style="position:relative;height:200px"><canvas id="c-garch"></canvas></div>
       </div>`: `<div class="card" style="margin-bottom:0;display:flex;align-items:center;justify-content:center"><span style="color:#64748b">Datos GARCH no disponibles</span></div>`;
 
-
       el.innerHTML = `
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
-        <div class="ct" style="margin-bottom:0">Exposición de Betas y Composición del Portafolio</div>
+        <div class="ct" style="margin-bottom:0">Composición Manual del Portafolio</div>
         <div id="sum-badge" style="background:#1e2435;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;color:#94a3b8">Total: <span id="sum-val">--</span>%</div>
       </div>
       
@@ -1110,7 +1192,7 @@
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="font-size:11px;color:#64748b;line-height:1.4">
           * Los pesos se re-normalizarán proporcionalmente al 100% si la suma es menor.<br>
-          * Volatilidad anual portafolio (actual): <span style="font-family:'SF Mono',monospace;color:#94a3b8">${pct(pd.volatilidad_anualizada)}</span>
+          * Volatilidad anual portafolio manual: <span style="font-family:'SF Mono',monospace;color:#94a3b8">${pct(pd.volatilidad_anualizada)}</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button
@@ -1135,60 +1217,8 @@
         </div>
       </div>
     </div>
-    <div class="card" style="border-color:${perfilColor};border-width:2px;margin-bottom:1.25rem">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
-        <div>
-          <div class="ct" style="color:${perfilColor};margin-bottom:6px">${perfilIcon} Perfil de Riesgo del Portafolio</div>
-          <div style="font-size:20px;font-weight:700;color:${perfilColor}">${perfil}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Beta Ponderado</div>
-          <div style="font-size:32px;font-weight:700;font-family:'SF Mono',monospace;color:${perfilColor}">${f2(betaPort)}</div>
-        </div>
-      </div>
-      <div style="font-size:12px;color:#94a3b8;line-height:1.6;margin-bottom:14px">
-        <strong style="color:#e2e8f0">Objetivo técnico:</strong> ${perfilDesc}
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
-        <div style="background:#0f1117;border-radius:8px;padding:10px">
-          <div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Volatilidad Anual</div>
-          <div style="font-size:18px;font-weight:600;font-family:'SF Mono',monospace;color:${perfilColor}">${pct(pd.volatilidad_anualizada)}</div>
-          <div style="font-size:10px;color:#475569;margin-top:3px">bench: ${pct(bd.volatilidad_anualizada)}</div>
-        </div>
-        <div style="background:#0f1117;border-radius:8px;padding:10px">
-          <div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">VaR 95% Diario</div>
-          <div style="font-size:18px;font-weight:600;font-family:'SF Mono',monospace;color:${perfilColor}">${v.parametrico.var_diario_pct}</div>
-          <div style="font-size:10px;color:#475569;margin-top:3px">paramétrico</div>
-        </div>
-        <div style="background:#0f1117;border-radius:8px;padding:10px">
-          <div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">CVaR 95% (ES)</div>
-          <div style="font-size:18px;font-weight:600;font-family:'SF Mono',monospace;color:${perfilColor}">${cv.cvar_diario_pct}</div>
-          <div style="font-size:10px;color:#475569;margin-top:3px">expected shortfall</div>
-        </div>
-        <div style="background:#0f1117;border-radius:8px;padding:10px">
-          <div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Max Drawdown</div>
-          <div style="font-size:18px;font-weight:600;font-family:'SF Mono',monospace;color:${perfilColor}">${pct(pd.maximo_drawdown)}</div>
-          <div style="font-size:10px;color:#475569;margin-top:3px">bench: ${pct(bd.maximo_drawdown)}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div style="background:#0f1117;border-radius:8px;padding:10px">
-          <div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Estrategia</div>
-          <div style="font-size:12px;color:#94a3b8;line-height:1.5">${perfilEstrategia}</div>
-        </div>
-        <div style="background:#0f1117;border-radius:8px;padding:10px">
-          <div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Tickers sugeridos para este perfil</div>
-          <div style="font-size:12px;color:#ffffff;font-weight:600;line-height:1.6">${perfilTickers}</div>
-        </div>
-      </div>
-      <div style="margin-top:12px;font-size:11px;color:#475569;border-top:1px solid #1e2435;padding-top:10px">
-        <strong style="color:#64748b">Escala β:</strong>
-        <span style="color:#3dd32c">■ Defensivo (β &lt; 0.8)</span> · 
-        <span style="color:#3b82f6">■ Dinámico (0.8 – 1.2)</span> · 
-        <span style="color:#f59e0b">■ Agresivo (1.2 – 1.5)</span> · 
-        <span style="color:#ef4444">■ Especulativo (β &gt; 1.5)</span>
-      </div>
-    </div>
+    
+    ${perfilesHtml}
     <div class="card" style="margin-top:1.5rem;border-left:4px solid #f59e0b">
       <div class="ct">5. Backtesting del Modelo VaR (Test de Kupiec)</div>
       <div class="g2">
@@ -1327,10 +1357,10 @@
 
       el.innerHTML = `
     <div class="g2">
-      <div class="card" style="border-color:#10b981;margin-bottom:0">
-        <div class="ct" style="color:#10b981">Portafolio Mínima Varianza ★</div>
-        <div style="font-size:13px;font-family:'SF Mono',monospace;color:#94a3b8;margin-bottom:12px">Vol <span style="color:#10b981;font-weight:600">${pct(mv.volatilidad_anual)}</span> &nbsp; Ret ${pctS(mv.rendimiento_anual)} &nbsp; Sharpe ${f2(mv.sharpe_ratio)}</div>
-        ${mv.tickers.map((t, i) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid #1e2435"><span style="color:#94a3b8">${t}</span><div style="display:flex;align-items:center;gap:7px"><div style="width:${mv.pesos[i] * 100}px;height:4px;background:#10b981;border-radius:2px"></div><span style="font-family:'SF Mono',monospace;min-width:38px;text-align:right">${pct(mv.pesos[i])}</span></div></div>`).join('')}
+      <div class="card" style="border-color:#3dd32c;margin-bottom:0">
+        <div class="ct" style="color:#3dd32c">Portafolio Mínima Varianza ★</div>
+        <div style="font-size:13px;font-family:'SF Mono',monospace;color:#94a3b8;margin-bottom:12px">Vol <span style="color:#3dd32c;font-weight:600">${pct(mv.volatilidad_anual)}</span> &nbsp; Ret ${pctS(mv.rendimiento_anual)} &nbsp; Sharpe ${f2(mv.sharpe_ratio)}</div>
+        ${mv.tickers.map((t, i) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid #1e2435"><span style="color:#94a3b8">${t}</span><div style="display:flex;align-items:center;gap:7px"><div style="width:${mv.pesos[i] * 100}px;height:4px;background:#3dd32c;border-radius:2px"></div><span style="font-family:'SF Mono',monospace;min-width:38px;text-align:right">${pct(mv.pesos[i])}</span></div></div>`).join('')}
       </div>
       <div class="card" style="border-color:#f59e0b;margin-bottom:0">
         <div class="ct" style="color:#f59e0b">Portafolio Máximo Sharpe ★</div>
@@ -1643,8 +1673,12 @@
     function sw(name, btn) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('act'));
       btn.classList.add('act');
-      ['perf', 'risk', 'optim', 'sig', 'vol'].forEach(n => document.getElementById('s-' + n).style.display = n === name ? '' : 'none');
-      ({ perf: renderPerf, risk: renderRisk, optim: renderOptim, sig: renderSig, vol: renderVol }[name])();
+      ['perf', 'risk', 'optim', 'sig', 'vol', 'fixed', 'deriv', 'ml'].forEach(n => {
+        const el = document.getElementById('s-' + n);
+        if (el) el.style.display = n === name ? '' : 'none';
+      });
+      const fn = { perf: renderPerf, risk: renderRisk, optim: renderOptim, sig: renderSig, vol: renderVol, fixed: renderFixed, deriv: renderDeriv, ml: renderML }[name];
+      if (fn) fn();
     }
 
     /* ══ E. VOLATILIDAD ════════════════════════════════════ */
@@ -1909,6 +1943,320 @@
         }
       });
     }
+
+    /* ══ F. RENTA FIJA (Nelson-Siegel) ════════════════════ */
+    function renderFixed() {
+      if (!GLOBAL) return;
+      const el = document.getElementById('s-fixed');
+      const f = GLOBAL.fixed;
+
+      if (!f || f.error || !f.nelson_siegel) {
+        el.innerHTML = `<div class="card" style="text-align:center;padding:50px;color:#94a3b8">No hay datos de renta fija disponibles o el modelo falló.</div>`;
+        return;
+      }
+
+      const ns = f.nelson_siegel;
+      if (!ns.exito) {
+        el.innerHTML = `<div class="card" style="text-align:center;padding:50px;color:#f87171">Error ajustando la curva Nelson-Siegel: ${ns.error}</div>`;
+        return;
+      }
+
+      const p = ns.parametros;
+      const cTeo = ns.curva_teorica;
+
+      el.innerHTML = `
+        <div class="g4">
+          <div class="mc"><div class="ml">Beta 0 (Nivel)</div><div class="mv">${f3(p.beta0)}</div><div class="ms">Largo Plazo</div></div>
+          <div class="mc"><div class="ml">Beta 1 (Pendiente)</div><div class="mv">${f3(p.beta1)}</div><div class="ms">Corto Plazo</div></div>
+          <div class="mc"><div class="ml">Beta 2 (Curvatura)</div><div class="mv">${f3(p.beta2)}</div><div class="ms">Medio Plazo</div></div>
+          <div class="mc"><div class="ml">Tau (Decaimiento)</div><div class="mv">${f3(p.tau)}</div><div class="ms">Localización</div></div>
+        </div>
+        <div class="card">
+          <div class="ct">Curva de Rendimientos (Treasury Yield Curve) — Ajuste Spline / Nelson-Siegel</div>
+          <div style="position:relative;height:350px"><canvas id="c-fixed"></canvas></div>
+          <div style="font-size:11px;color:#64748b;margin-top:15px;line-height:1.4">
+            <strong>Interpretación:</strong> La línea sólida azul representa el modelo continuo de Nelson-Siegel. 
+            Los puntos rojos son las tasas de mercado del Tesoro de EE.UU. (observaciones reales).
+            Una curva plana o invertida es una señal clásica de advertencia de contracción económica.
+          </div>
+        </div>
+      `;
+
+      regCh('c-fixed', {
+        type: 'line',
+        data: {
+          labels: cTeo.maduraciones.map(m => m.toFixed(1)),
+          datasets: [
+            { 
+              label: 'Modelo Nelson-Siegel', 
+              data: cTeo.tasas.map(t => t * 100), 
+              borderColor: '#22d3ee', 
+              borderWidth: 3, 
+              pointRadius: 0, 
+              fill: true,
+              backgroundColor: 'rgba(34, 211, 238, 0.05)',
+              tension: 0.4 
+            },
+            { 
+              label: 'Puntos Reales (Mercado)', 
+              data: f.puntos_reales.map(pt => ({ x: pt.maduracion.toFixed(1), y: pt.tasa * 100 })), 
+              type: 'scatter', 
+              backgroundColor: '#ef4444', 
+              borderColor: '#ffffff',
+              borderWidth: 1,
+              pointRadius: 6,
+              pointHoverRadius: 8
+            }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: true, labels: { color: tc } } },
+          scales: {
+            x: { 
+              ...axBase, 
+              title: { display: true, text: 'Maduración (Años)', color: tc },
+              type: 'category' 
+            },
+            y: { 
+              ...axBase, 
+              title: { display: true, text: 'Tasa de Rendimiento (%)', color: tc } 
+            }
+          }
+        }
+      });
+    }
+
+    /* ══ G. DERIVADOS (Black-Scholes) ═════════════════════ */
+    async function loadDeriv() {
+      const btn = document.getElementById('btn-deriv-calc');
+      btn.innerText = "Calculando..."; btn.disabled = true;
+      try {
+        const body = {
+          S: parseFloat(document.getElementById('bs-s').value),
+          K: parseFloat(document.getElementById('bs-k').value),
+          T: parseFloat(document.getElementById('bs-t').value) / 365,
+          r: parseFloat(document.getElementById('bs-r').value) / 100,
+          sigma: parseFloat(document.getElementById('bs-v').value) / 100,
+          tipo: document.getElementById('bs-type').value
+        };
+        const res = await api('/derivados/black-scholes', {}, 'POST', body);
+        renderDerivResults(res);
+      } catch (e) {
+        alert("Error: " + e.message);
+      } finally {
+        btn.innerText = "Simular Opción"; btn.disabled = false;
+      }
+    }
+
+    function renderDeriv() {
+      const el = document.getElementById('s-deriv');
+      el.innerHTML = `
+        <div class="card">
+          <div class="ct">Calculadora de Opciones Europeas — Black-Scholes-Merton</div>
+          <div class="form-panel" style="background:#05080f; margin-bottom:20px">
+            <div class="form-grp"><label>Precio (S)</label><input type="number" id="bs-s" class="form-input" value="100"></div>
+            <div class="form-grp"><label>Strike (K)</label><input type="number" id="bs-k" class="form-input" value="100"></div>
+            <div class="form-grp"><label>Días (T)</label><input type="number" id="bs-t" class="form-input" value="30"></div>
+            <div class="form-grp"><label>Tasa % (r)</label><input type="number" id="bs-r" class="form-input" value="5.25" step="0.01"></div>
+            <div class="form-grp"><label>Vol % (σ)</label><input type="number" id="bs-v" class="form-input" value="25"></div>
+            <div class="form-grp">
+              <label>Tipo</label>
+              <select id="bs-type" class="form-input" style="font-family:inherit">
+                <option value="call">CALL</option>
+                <option value="put">PUT</option>
+              </select>
+            </div>
+            <div class="form-grp"><button id="btn-deriv-calc" class="btn-analizar" onclick="loadDeriv()">Simular Opción</button></div>
+          </div>
+          <div id="bs-results">
+            <div style="text-align:center;padding:40px;color:#64748b">Ingrese parámetros y haga clic en Simular.</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDerivResults(res) {
+      const cont = document.getElementById('bs-results');
+      const v = res.valoracion;
+      const g = v.griegas;
+      const s = res.superficie;
+
+      cont.innerHTML = `
+        <div class="g2">
+          <div class="mc" style="border-color:#3dd32c">
+            <div class="ml" style="color:#3dd32c">Precio Teórico</div>
+            <div class="mv" style="color:#3dd32c">$${f2(v.precio)}</div>
+            <div class="ms" style="color:#3dd32c">Valor justo del contrato</div>
+          </div>
+          <div class="g4" style="grid-column: span 1; margin-bottom:0">
+            <div class="mc"><div class="ml">Delta</div><div class="mv" style="font-size:18px">${f3(g.delta)}</div></div>
+            <div class="mc"><div class="ml">Gamma</div><div class="mv" style="font-size:18px">${f3(g.gamma)}</div></div>
+            <div class="mc"><div class="ml">Vega</div><div class="mv" style="font-size:18px">${f3(g.vega)}</div></div>
+            <div class="mc"><div class="ml">Theta</div><div class="mv" style="font-size:18px">${f3(g.theta)}</div></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:20px; background:#05080f">
+          <div class="ct">Superficie de Precios (Simulación S vs T)</div>
+          <div id="plotly-surface" style="height:500px; width:100%"></div>
+        </div>
+      `;
+
+      // Plotly 3D Surface
+      const data = [{
+        z: s.z_precios,
+        x: s.x_subyacente,
+        y: s.y_tiempo.map(t => Math.round(t * 365)),
+        type: 'surface',
+        colorscale: 'Viridis',
+        showscale: false
+      }];
+
+      const layout = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        margin: { l: 0, r: 0, b: 0, t: 0 },
+        scene: {
+          xaxis: { title: 'Precio Subyacente (S)', color: '#94a3b8' },
+          yaxis: { title: 'Tiempo (Días)', color: '#94a3b8' },
+          zaxis: { title: 'Precio Opción', color: '#94a3b8' },
+          camera: { eye: { x: 1.5, y: 1.5, z: 1.2 } }
+        }
+      };
+
+      Plotly.newPlot('plotly-surface', data, layout);
+    }
+
+    /* ══ H. IA PREDICTIVA (Random Forest) ═════════════════ */
+    let mlAbortController = null;
+
+    async function runML() {
+      const ticker = document.getElementById('ml-ticker').value.toUpperCase();
+      const btn = document.getElementById('btn-ml');
+      const btnCancel = document.getElementById('btn-ml-cancel');
+      const cont = document.getElementById('ml-results');
+      
+      btn.innerText = "Pensando..."; btn.disabled = true;
+      if(btnCancel) { btnCancel.style.display = "inline-block"; }
+      cont.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div>Consultando oráculo de IA...</div>';
+
+      mlAbortController = new AbortController();
+
+      try {
+        const res = await api(`/predict/${ticker}`, {}, 'GET', null, mlAbortController.signal);
+        if (res.error) throw new Error(res.error);
+        
+        const sigColor = res.señal.includes('BUY') ? '#3dd32c' : res.señal.includes('SELL') ? '#ef4444' : '#f59e0b';
+        
+        cont.innerHTML = `
+          <div class="g2">
+            <div class="card" style="border-left:5px solid ${sigColor}">
+              <div class="ct">Predicción del Algoritmo (Próximos 5 días)</div>
+              <div style="font-size:32px; font-weight:800; color:${sigColor}; margin-bottom:10px">${res.señal}</div>
+              <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px">
+                <div class="bar-track" style="height:10px; background:#1e293b"><div class="bar-fill" style="width:${res.confianza * 100}%; background:${sigColor}; height:10px"></div></div>
+                <div style="font-family:'JetBrains Mono'; font-weight:700; color:${sigColor}">${pct(res.confianza, 1)}</div>
+              </div>
+              <div style="font-size:12px; color:#64748b">Confianza del modelo basada en Random Forest Classifier.</div>
+            </div>
+            <div class="card">
+              <div class="ct">Importancia de Variables (Features)</div>
+              <div id="ml-imp-cont" style="height:160px; position:relative"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="ct">Distribución de Probabilidades</div>
+            <div class="g3">
+              ${Object.entries(res.probabilidades).map(([lab, val]) => `
+                <div style="text-align:center; background:#05080f; padding:10px; border-radius:8px">
+                  <div style="font-size:10px; color:#64748b; margin-bottom:5px">${lab}</div>
+                  <div style="font-size:18px; font-weight:700; color:${lab.includes('BUY') ? '#3dd32c' : lab.includes('SELL') ? '#ef4444' : '#f59e0b'}">${pct(val, 1)}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+
+        // Bar Chart para Importancia
+        const imp = res.importancia_variables;
+        const labels = Object.keys(imp);
+        const values = Object.values(imp).map(v => v * 100);
+
+        new Chart(document.createElement('canvas'), {}).destroy(); // Clear hack
+        const ctx = document.createElement('canvas');
+        document.getElementById('ml-imp-cont').appendChild(ctx);
+        
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{ data: values, backgroundColor: '#3b82f6', borderRadius: 4 }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ...axBase, title: { display: true, text: 'Importancia %', color: tc } },
+              y: { ...axBase }
+            }
+          }
+        });
+
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          cont.innerHTML = `<div class="card" style="color:#f59e0b; text-align:center; padding:30px">Predicción cancelada por el usuario.</div>`;
+        } else {
+          cont.innerHTML = `<div class="card" style="color:#ef4444; text-align:center; padding:30px">Error en predicción: ${e.message}</div>`;
+        }
+      } finally {
+        btn.innerText = "Generar Predicción"; btn.disabled = false;
+        const btnCancel = document.getElementById('btn-ml-cancel');
+        if(btnCancel) { btnCancel.style.display = "none"; }
+        mlAbortController = null;
+      }
+    }
+
+    function cancelML() {
+      if (mlAbortController) {
+        mlAbortController.abort();
+      }
+    }
+
+    function renderML() {
+      const el = document.getElementById('s-ml');
+      const optionsHtml = GLOBAL ? GLOBAL.tickers.map(t => `<option value="${t}">${t}</option>`).join('') : '<option value="AAPL">AAPL</option>';
+      
+      el.innerHTML = `
+        <div class="card">
+          <div class="ct">Módulo de Machine Learning — Predicción de Tendencia</div>
+          <div class="form-panel" style="background:#05080f; margin-bottom:20px; max-width:500px">
+            <div class="form-grp" style="flex:1">
+              <label>Ticker a Predecir</label>
+              <select id="ml-ticker" class="form-input" style="font-family:inherit">
+                ${optionsHtml}
+              </select>
+            </div>
+            <div class="form-grp" style="display:flex; gap:10px; align-items:flex-end">
+              <button id="btn-ml" class="btn-analizar" style="background:#a78bfa; color:#05080f" onclick="runPrediction()">Generar Predicción</button>
+              <button id="btn-ml-cancel" class="btn-analizar" style="background:transparent; border:1px solid #ef4444; color:#ef4444; display:none" onclick="cancelPrediction()">Cancelar</button>
+            </div>
+          </div>
+          <div id="ml-results">
+            <div style="text-align:center;padding:40px;color:#64748b">Seleccione un activo para ver la proyección de la IA.</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Proxy para que el onclick del HTML funcione con la función definida dentro de renderML
+    window.runPrediction = runML;
+    window.cancelPrediction = cancelML;
+    window.renderFixed = renderFixed;
+    window.renderDeriv = renderDeriv;
+    window.renderML = renderML;
+    window.loadDeriv = loadDeriv;
+
   </script>
 </body>
 

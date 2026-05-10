@@ -24,6 +24,8 @@ from fastapi import Request
 
 from app.config import get_settings, Settings
 from app.dependencies import get_data_service, DataService
+from app.database import get_db
+from sqlalchemy.orm import Session
 from app.services import RiskService
 from app.models import (
     ActivosResponse,
@@ -37,6 +39,10 @@ from app.models import (
     AlertasResponse,
     MacroResponse,
     GARCHResponse,
+    CurvaRendimientosResponse,
+    BlackScholesRequest,
+    BlackScholesResponse,
+    PredictionResponse,
 )
 
 # ──────────────────────────────────────────────
@@ -69,17 +75,17 @@ def log_request(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         inicio = time.perf_counter()
-        logger.info(f"→ {func.__name__}() llamado")
+        logger.info(f"-> {func.__name__}() llamado")
         try:
             resultado = await func(*args, **kwargs)
             ms = (time.perf_counter() - inicio) * 1000
-            logger.info(f"✓ {func.__name__}() OK en {ms:.1f}ms")
+            logger.info(f"[OK] {func.__name__}() ejecutado en {ms:.1f}ms")
             return resultado
         except HTTPException:
             raise
         except Exception as exc:
             ms = (time.perf_counter() - inicio) * 1000
-            logger.error(f"✗ {func.__name__}() ERROR en {ms:.1f}ms → {exc}")
+            logger.error(f"[ERR] {func.__name__}() fallo en {ms:.1f}ms -> {exc}")
             raise
     return wrapper
 
@@ -124,6 +130,19 @@ app.add_middleware(
 )
 
 
+# ── Inicialización de la Base de Datos al arrancar ────
+@app.on_event("startup")
+def on_startup():
+    """
+    Crea las tablas en SQLite si no existen.
+    Base.metadata.create_all es idempotente: no destruye tablas existentes.
+    """
+    from app.database import engine, Base
+    from app.models.db_models import Asset, Price, Portfolio, PredictionLog, SignalLog  # noqa: F401
+    Base.metadata.create_all(bind=engine)
+    logger.info("Base de datos SQLite inicializada (tablas verificadas)")
+
+
 # ──────────────────────────────────────────────
 # MANEJADOR DE ERRORES 422
 # ──────────────────────────────────────────────
@@ -166,12 +185,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 def get_risk_service(
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
 ) -> RiskService:
     """
     Dependencia que crea e inyecta el servicio de riesgo.
     Las rutas reciben RiskService pre-configurado — no instancian nada.
     """
-    return RiskService(settings)
+    return RiskService(settings, db)
 
 
 # ══════════════════════════════════════════════
@@ -225,11 +245,7 @@ async def get_activos(
     svc: RiskService = Depends(get_risk_service),
     settings: Settings = Depends(get_settings),
 ):
-    import sys, os
-    _SRC = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-    if _SRC not in sys.path:
-        sys.path.insert(0, _SRC)
-    from api_client import obtener_info_ticker
+    from app.services.api_client import obtener_info_ticker
 
     lista = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     activos = []
@@ -573,3 +589,74 @@ async def get_macro(
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     return resultado
+
+
+# ══════════════════════════════════════════════
+# 9. RENTA FIJA (Curva de Rendimientos)
+# ══════════════════════════════════════════════
+
+@app.get(
+    "/renta-fija/curva",
+    response_model=CurvaRendimientosResponse,
+    summary="Curva de Rendimientos (Nelson-Siegel)",
+    description="Descarga las tasas del Tesoro desde FRED y ajusta la curva teórica con Nelson-Siegel.",
+    tags=["Módulo 3: Renta Fija"],
+)
+@log_request
+async def endpoint_curva_rendimientos(
+    svc: RiskService = Depends(get_risk_service),
+):
+    try:
+        return svc.calcular_curva_rendimientos()
+    except Exception as e:
+        logger.error(f"Error en /renta-fija/curva: {e}")
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+# ══════════════════════════════════════════════
+# 10. DERIVADOS (Black-Scholes-Merton)
+# ══════════════════════════════════════════════
+
+@app.post(
+    "/derivados/black-scholes",
+    response_model=BlackScholesResponse,
+    summary="Valoración de Opciones (Black-Scholes)",
+    description="Calcula la prima de una opción, sus griegas y la superficie de precios usando el modelo continuo de Black-Scholes-Merton.",
+    tags=["Módulo 3: Derivados"],
+)
+@log_request
+async def endpoint_black_scholes(
+    request: BlackScholesRequest,
+    svc: RiskService = Depends(get_risk_service),
+):
+    try:
+        req_dict = request.model_dump()
+        return svc.calcular_black_scholes(req_dict)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error en /derivados/black-scholes: {e}")
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+# ══════════════════════════════════════════════
+# 11. MACHINE LEARNING (Predicciones)
+# ══════════════════════════════════════════════
+
+@app.get(
+    "/predict/{ticker}",
+    response_model=PredictionResponse,
+    summary="Predicción de Tendencia (ML)",
+    description="Analiza los datos más recientes del activo y genera una señal (Buy/Hold/Sell) usando Random Forest.",
+    tags=["Módulo 3: Machine Learning"],
+)
+@log_request
+async def endpoint_predict(
+    ticker: str,
+    svc: RiskService = Depends(get_risk_service),
+):
+    try:
+        return svc.predecir_tendencia(ticker.upper())
+    except Exception as e:
+        logger.error(f"Error en /predict/{ticker}: {e}")
+        return JSONResponse(status_code=500, content={"detail": str(e)})

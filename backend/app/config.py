@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # Ticker del índice de referencia (benchmark)
     BENCHMARK_TICKER: str = "^GSPC"  # S&P 500
 
+    # ── Base de Datos ─────────────────────────────────────
+    # SQLite embebido (cero configuración). Para producción,
+    # cambiar a "postgresql://user:pass@host/db" sin tocar el ORM.
+    DATABASE_URL: str = "sqlite:///./risklab.db"
+
     # Serie FRED para tasa libre de riesgo
     FRED_RF_SERIE: str = "DGS3MO"   # T-Bill 3 meses
 
