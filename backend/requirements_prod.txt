@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────
-# RISK METER DASHBOARD API — Backend Dependencies
+# RISK METER DASHBOARD API — Backend Dependencies (PRODUCCIÓN)
 # Versiones fijas para reproducibilidad exacta
 # ─────────────────────────────────────────────
 
@@ -28,14 +28,7 @@ arch>=7.0.0
 
 # ── Base de Datos ────────────────────────
 sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0  # PostgreSQL driver para Supabase
+psycopg2-binary>=2.9.0
 
 # ── Utilidades ────────────────────────────
 python-dotenv>=1.0.1
-requests>=2.32.0
-
-# ── Persistencia (Capa 1) ────────────────
-sqlalchemy>=2.0.30
-
-# ── Machine Learning (Capa 4) ────────────
-joblib>=1.4.0

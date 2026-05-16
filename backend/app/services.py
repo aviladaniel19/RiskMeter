@@ -807,32 +807,30 @@ class RiskService:
         metricas_port = metricas_serie(ret_port, rf)
         metricas_bench = metricas_serie(ret_bench, rf)
 
-        # Indicadores macro
+        # Indicadores macro con fallbacks inteligentes (datos aprox. recientes si falla FRED)
         macro_series = {
-            "DGS3MO": ("Tasa Libre de Riesgo (T-Bill 3M)", "%"),
-            "CPIAUCSL": ("Inflación (CPI)", "índice"),
-            "DFF": ("Federal Funds Rate", "%"),
-            "T10Y2Y": ("Spread 10Y-2Y", "puntos base"),
+            "DGS3MO": ("Tasa Libre de Riesgo (T-Bill 3M)", "%", 0.0525),
+            "CPIAUCSL": ("Inflación (CPI)", "índice", 312.2),
+            "DFF": ("Federal Funds Rate", "%", 0.0533),
+            "T10Y2Y": ("Spread 10Y-2Y", "puntos base", -35.0),
         }
         indicadores = []
-        for serie, (nombre, unidad) in macro_series.items():
+        for serie, (nombre, unidad, fallback) in macro_series.items():
             try:
                 datos = obtener_dato_macro(serie)
-                indicadores.append({
-                    "nombre": nombre,
-                    "serie_fred": serie,
-                    "valor_actual": float(datos.iloc[-1]),
-                    "unidad": unidad,
-                    "fecha_actualizacion": str(datos.index[-1].date()),
-                })
+                valor = float(datos.iloc[-1])
+                fecha = str(datos.index[-1].date())
             except Exception:
-                indicadores.append({
-                    "nombre": nombre,
-                    "serie_fred": serie,
-                    "valor_actual": 0.0,
-                    "unidad": unidad,
-                    "fecha_actualizacion": "N/D",
-                })
+                valor = fallback
+                fecha = "Fallback (API Offline)"
+
+            indicadores.append({
+                "nombre": nombre,
+                "serie_fred": serie,
+                "valor_actual": valor,
+                "unidad": unidad,
+                "fecha_actualizacion": fecha,
+            })
 
         return {
             "indicadores_macro": indicadores,

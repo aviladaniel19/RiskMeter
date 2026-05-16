@@ -1,5 +1,7 @@
 # Variables de entorno (API keys)
 .env
+.env.local
+.env.*.local
 
 # Datos crudos descargados
 data/raw/
@@ -67,3 +69,39 @@ coverage.xml
 dist/
 build/
 *.egg-info/
+
+# ----------------------------
+# Documentación y guías (excluir archivos grandes/privados)
+# ----------------------------
+# Archivos de documentación generados o privados
+CHANGELOG_DOCUMENTACION.md
+CHANGELOG.md
+CONTRIBUTING.md
+cumplimiento_rubrica.html
+documentacion_completa.html
+DOCUMENTACION.html
+GUIA_DE_LECTURA.txt
+README_DOCUMENTACION.md
+RESUMEN_ENTREGA.md
+
+# Guías internas y notas
+GUIA_VERCEL_SUPABASE.md
+INICIO_RAPIDO.md
+CHECKLIST_DEPLOYMENT.md
+CAMBIOS_TECNICOS.md
+
+# Patrones generales para documentación no deseada
+*DOCUMENTACION*
+*GUIA*
+*RESUMEN*
+
+# ----------------------------
+# Bases de datos locales y archivos binarios
+# ----------------------------
+backend/*.db
+*.db
+*.sqlite
+
+# Datos procesados y resultados
+data/processed/
+

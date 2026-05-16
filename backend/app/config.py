@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     BENCHMARK_TICKER: str = "^GSPC"  # S&P 500
 
     # ── Base de Datos ─────────────────────────────────────
-    # SQLite embebido (cero configuración). Para producción,
-    # cambiar a "postgresql://user:pass@host/db" sin tocar el ORM.
+    # Para desarrollo: SQLite
+    # Para producción: PostgreSQL (Supabase)
     DATABASE_URL: str = "sqlite:///./risklab.db"
 
     # Serie FRED para tasa libre de riesgo

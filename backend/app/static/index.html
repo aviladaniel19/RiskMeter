@@ -1161,6 +1161,12 @@
       </div>`: `<div class="card" style="margin-bottom:0;display:flex;align-items:center;justify-content:center"><span style="color:#64748b">Datos GARCH no disponibles</span></div>`;
 
       el.innerHTML = `
+    <div class="g4">
+      <div class="mc" style="border-color:#FF0000"><div class="ml" style="color:#FF0000">Beta del Portafolio</div><div class="mv" style="color:#FF0000">${f2(betaPort)}</div><div class="ms">Sensibilidad vs ${GLOBAL.capm.benchmark}</div></div>
+      <div class="mc"><div class="ml">VaR (95%) Histórico</div><div class="mv">${pct(v.historico.var_diario)}</div><div class="ms">Exposición máxima diaria</div></div>
+      <div class="mc"><div class="ml">CVaR (95%)</div><div class="mv">${pct(cv.cvar_diario)}</div><div class="ms">Pérdida media en cola</div></div>
+      <div class="mc" style="border-color:#3dd32c"><div class="ml" style="color:#3dd32c">Volatilidad Anual</div><div class="mv">${pct(pd.volatilidad_anualizada)}</div><div class="ms">Riesgo total anualizado</div></div>
+    </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
         <div class="ct" style="margin-bottom:0">Composición Manual del Portafolio</div>
