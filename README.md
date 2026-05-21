@@ -73,7 +73,41 @@ El proyecto incluye un script automatizado que gestiona el entorno virtual y lan
 
 ---
 
+## 🐳 Ejecución con Docker (Alternativa Multiplataforma)
+
+El proyecto incluye soporte completo para **Docker** y **Docker Compose**, lo que facilita su ejecución en Windows, macOS o Linux sin necesidad de configurar entornos de Python locales ni compilar extensiones manuales.
+
+### 1. Prerrequisitos
+* Tener instalado y ejecutándose **Docker Desktop** (o Docker Engine).
+
+### 2. Instrucciones para Ejecutar
+1. Asegúrate de tener configurada tu clave en el archivo `.env` en la raíz o en `backend/`:
+   ```env
+   FRED_API_KEY=tu_clave_real_aqui
+   ```
+2. Abre una terminal en la raíz del proyecto (donde está el archivo `docker-compose.yml`) y ejecuta:
+   ```bash
+   docker-compose up -d --build
+   ```
+   *Nota: La primera vez tomará unos minutos compilando las dependencias matemáticas (como `arch` para GARCH).*
+3. Abre tu navegador e ingresa a:
+   * **Dashboard y API:** [http://localhost:8000](http://localhost:8000)
+   * **Swagger UI (Docs interactiva):** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+### 3. Comandos Útiles
+* **Ver logs en tiempo real:**
+  ```bash
+  docker-compose logs -f
+  ```
+* **Detener y limpiar contenedores:**
+  ```bash
+  docker-compose down
+  ```
+
+---
+
 ## 📄 Licencia
 Este proyecto está bajo la licencia **MIT**. Eres libre de usarlo y modificarlo con la debida atribución.
 
 ⭐ **Si este proyecto te ha sido útil, ¡considera darle una estrella!**
+
