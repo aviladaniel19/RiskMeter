@@ -26,10 +26,6 @@ scikit-learn>=1.4.0
 # ── Modelos de volatilidad ────────────────
 arch>=7.0.0
 
-# ── Base de Datos ────────────────────────
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0  # PostgreSQL driver para Supabase
-
 # ── Utilidades ────────────────────────────
 python-dotenv>=1.0.1
 requests>=2.32.0
